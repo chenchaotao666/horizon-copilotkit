@@ -6,7 +6,7 @@ import CodeMirror from '@uiw/react-codemirror';
 import { javascript } from '@codemirror/lang-javascript';
 import { json } from '@codemirror/lang-json';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { storeToRAG, exportFile } from '../services/api';
+import { exportFile } from '../services/api';
 
 interface Tab2Props {
   functionDefinition: string;
@@ -191,24 +191,39 @@ const Tab2FunctionDefinition: React.FC<Tab2Props> = ({
         return;
       }
       
-      const response = await storeToRAG(ragData);
+      // 直接调用RAG服务的API
+      const RAG_BASE_URL = import.meta.env.VITE_RAG_BASE_URL || 'http://localhost:8000';
       
-      if (response.success) {
-        const successMsg = response.function_id 
-          ? `成功存储到RAG数据库！函数ID: ${response.function_id}`
-          : '成功存储到RAG数据库！';
-        message.success(successMsg);
-      } else {
-        message.error('存储到RAG失败');
+      const response = await fetch(`${RAG_BASE_URL}/functions/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(ragData)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        console.error('RAG服务响应失败:', errorData);
+        message.error(`存储失败: ${response.status} ${response.statusText}`);
+        return;
       }
+
+      const result = await response.json();
+      
+      const successMsg = result.function_id 
+        ? `成功存储到RAG数据库！函数ID: ${result.function_id}`
+        : '成功存储到RAG数据库！';
+      message.success(successMsg);
+      
     } catch (error: any) {
       console.error('Store to RAG error:', error);
       
       // 更详细的错误处理
-      if (error.response?.data?.error) {
-        message.error(`存储失败: ${error.response.data.error}`);
-      } else if (error.message?.includes('JSON')) {
+      if (error.name === 'SyntaxError' && error.message.includes('JSON')) {
         message.error('RAG Request格式错误，请重新生成');
+      } else if (error.message?.includes('fetch')) {
+        message.error('无法连接到RAG服务，请检查服务是否启动（端口8000）');
       } else {
         message.error('存储到RAG失败，请检查网络连接和RAG服务状态');
       }
