@@ -67,7 +67,7 @@ if (!process.env.NO_PROXY) {
 const shouldRejectUnauthorized = process.env.DISABLE_SSL_VERIFY !== 'true' 
   && process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0';
 
-if (process.env.DISABLE_SSL_VERIFY === 'true' && !process.env.NODE_TLS_REJECT_UNAUTHORIZED) {
+if (process.env.DISABLE_SSL_VERIFY === 'true' || !process.env.NODE_TLS_REJECT_UNAUTHORIZED) {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 }
 
