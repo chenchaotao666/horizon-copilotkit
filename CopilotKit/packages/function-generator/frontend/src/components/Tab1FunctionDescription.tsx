@@ -8,7 +8,7 @@ import { GenerateFunctionRequest } from '../types';
 import { generateFunction, startPlaywrightRecord, checkRecordedScript, getFunctionSummaries, FunctionSummary } from '../services/api';
 
 interface Tab1Props {
-  onGenerated: (functionDefinition: string, executorCode: string, ragRequest: string) => void;
+  onGenerated: (functionDefinition: string, executorCode: string, ragRequest: string, functionType?: string) => void;
 }
 
 const Tab1FunctionDescription: React.FC<Tab1Props> = ({ onGenerated }) => {
@@ -71,6 +71,7 @@ const Tab1FunctionDescription: React.FC<Tab1Props> = ({ onGenerated }) => {
     try {
       const request: GenerateFunctionRequest = {
         functionName: values.functionName,
+        functionType: values.functionType,
         playwrightScript: playwrightScript,
         description: values.basicDescription,
         outputDesc: values.outputDescription,
@@ -79,12 +80,13 @@ const Tab1FunctionDescription: React.FC<Tab1Props> = ({ onGenerated }) => {
 
       const response = await generateFunction(request);
       
-      if (response.success && response.functionDefinition && response.executorCode && response.ragRequest) {
+      if (response.success && response.functionDefinition && response.executorCode) {
         message.success('LLM Function 定义和 Executor 生成成功！');
         onGenerated(
           response.functionDefinition, // 现在是代码字符串，不需要 JSON.stringify
           response.executorCode,
-          JSON.stringify(response.ragRequest, null, 2)
+          '', // 不自动生成RAG Request内容，留空
+          values.functionType // 传递functionType
         );
       } else {
         message.error(response.error || '生成失败，请重试');
@@ -226,6 +228,20 @@ await page.goto('${values.recordUrl}');
           placeholder="请输入函数名称，如: createUserSession"
           rules={[
             { required: true, message: '请输入函数名称' }
+          ]}
+        />
+        
+        <ProFormSelect
+          name="functionType"
+          label="Function类型"
+          placeholder="请选择Function类型"
+          options={[
+            { label: 'Menu - 菜单操作', value: 'menu' },
+            { label: 'Script Action - 脚本动作', value: 'script-action' }
+          ]}
+          initialValue="script-action"
+          rules={[
+            { required: true, message: '请选择Function类型' }
           ]}
         />
         

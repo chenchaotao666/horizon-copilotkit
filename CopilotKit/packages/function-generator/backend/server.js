@@ -635,11 +635,12 @@ function checkRecordingComplete(content, timeSinceLastModified, processRunning) 
 /**
  * 使用 DeepSeek 生成 LLM Function 定义和 Executor 代码
  */
-async function generateLLMFunction({ functionName, playwrightScript, description, outputDesc, dependencies }) {
+async function generateLLMFunction({ functionName, functionType, playwrightScript, description, outputDesc, dependencies }) {
   try {
     // 构建提示词
     const prompt = buildGenerationPrompt({
       functionName,
+      functionType,
       playwrightScript,
       description,
       outputDesc,
@@ -664,10 +665,6 @@ async function generateLLMFunction({ functionName, playwrightScript, description
     });
 
     const content = response.choices[0]?.message?.content;
-    logger.info('DeepSeek 原始响应', { 
-      response: JSON.stringify(response, null, 2),
-      content: content?.substring(0, 500) + '...'
-    });
     
     if (!content) {
       throw new Error('DeepSeek 返回内容为空');
@@ -705,16 +702,17 @@ function getSystemPrompt() {
 - 代码要清晰易读
 - 必须严格按照指定的 JSON 格式返回结果
 
-返回格式必须是有效的 JSON，包含三个字段：
+返回格式必须是有效的 JSON，**只能包含以下两个字段**：
 - functionDefinition: LLM Function 定义代码字符串 (export const 格式)
 - executorCode: Executor 代码字符串 (export const 格式)
-- ragRequest: RAG 存储请求对象`;
+
+**重要提醒：请不要生成任何其他字段！**`;
 }
 
 /**
  * 构建生成提示词
  */
-function buildGenerationPrompt({ functionName, playwrightScript, description, outputDesc, dependencies }) {
+function buildGenerationPrompt({ functionName, functionType, playwrightScript, description, outputDesc, dependencies }) {
   // 构建依赖信息
   const dependenciesText = dependencies.length > 0 
     ? `依赖的 Function：${dependencies.join(', ')}`
@@ -733,6 +731,7 @@ function buildGenerationPrompt({ functionName, playwrightScript, description, ou
 
 ## 基本信息
 - Function 名称：${functionName}
+- Function 类型：${functionType}
 - 功能描述：${description}
 - 输出描述：${outputDesc || '无特定输出描述'}
 - ${dependenciesText}
@@ -763,26 +762,76 @@ ${playwrightScript}
 - 返回有意义的结果消息
 - 必须使用 export const 方式导出函数
 
-### 3. RAG 存储要求：
-- 包含 function 的完整信息
-- 便于后续检索和复用
-
-请严格按照以下 JSON 格式返回结果：
+请严格按照以下 JSON 格式返回结果，**只能包含这两个字段**：
 
 \`\`\`json
 {
   "functionDefinition": "export const functionNameDefinition = {\\n  name: '函数名',\\n  description: '函数描述',\\n  parameters: {\\n    type: 'object',\\n    properties: {\\n      // 参数定义\\n    },\\n    required: []\\n  }\\n};",
-  "executorCode": "import { page } from '@copilotkit/playwright-actuator';\\n\\nexport const functionNameExecutor = async (params) => {\\n  // 完整的 executor 代码\\n};",
-  "ragRequest": {
-    "functionName": "函数名",
-    "description": "函数描述",
-    "category": "自动化操作",
-    "script": "playwright脚本",
-    "generated": "生成时间",
-    "dependencies": []
-  }
+  "executorCode": "import { page } from '@copilotkit/playwright-actuator';\\n\\nexport const functionNameExecutor = async (params) => {\\n  // 完整的 executor 代码\\n};"
 }
-\`\`\``;
+\`\`\`
+
+**注意事项：**
+1. JSON 中只能有 functionDefinition 和 executorCode 两个字段
+2. 不要添加任何其他字段
+3. 字符串中的换行符使用 \\n 表示
+4. 确保 JSON 格式正确，能够被解析`;
+}
+
+/**
+ * 清理和修复JSON字符串
+ */
+function cleanJsonString(jsonStr) {
+  try {
+    // 首先尝试直接解析，如果成功则返回原字符串
+    JSON.parse(jsonStr);
+    return jsonStr;
+  } catch (e) {
+    // 如果解析失败，进行清理
+    logger.info('JSON需要清理，开始处理转义字符');
+  }
+  
+  // 保存原始字符串用于调试
+  const original = jsonStr;
+  
+  
+  // 处理字符串中的转义字符问题
+  // 匹配JSON字符串值并修复转义
+  jsonStr = jsonStr.replace(/"([^"\\]*(\\.[^"\\]*)*)"(\s*:\s*"[^"\\]*(\\.[^"\\]*)*")/g, (match, key, _, valuepart) => {
+    // 修复键名
+    const cleanKey = key.replace(/\\\\/g, '\\').replace(/\\"/g, '"');
+    // 修复值部分的转义
+    const cleanValue = valuepart.replace(/\\\\/g, '\\').replace(/\\"/g, '\\"');
+    return `"${cleanKey}"${cleanValue}`;
+  });
+  
+  // 处理代码字符串中的换行符
+  jsonStr = jsonStr.replace(/"(functionDefinition|executorCode)"\s*:\s*"([^"]*(?:\\"[^"]*)*)"/g, (match, field, value) => {
+    // 保留 \\n 作为换行符的表示，但修复其他转义问题
+    let cleanValue = value;
+    
+    // 修复双重转义的引号
+    cleanValue = cleanValue.replace(/\\\\"/g, '\\"');
+    
+    // 确保换行符正确转义
+    cleanValue = cleanValue.replace(/\n/g, '\\n');
+    cleanValue = cleanValue.replace(/\t/g, '\\t');
+    
+    return `"${field}": "${cleanValue}"`;
+  });
+  
+  // 移除尾随逗号
+  jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+  
+  // 最后的清理
+  jsonStr = jsonStr.trim();
+  
+  logger.info('JSON清理完成', { 
+    originalLength: original.length, 
+    cleanedLength: jsonStr.length 
+  });
+  
+  return jsonStr;
 }
 
 /**
@@ -800,20 +849,39 @@ function parseGeneratedCode(content) {
     // 清理可能的额外字符
     jsonStr = jsonStr.trim();
     
-    const result = JSON.parse(jsonStr);
+    // 清理JSON字符串
+    jsonStr = cleanJsonString(jsonStr);
+    
+    // 尝试解析JSON
+    let result;
+    try {
+      result = JSON.parse(jsonStr);
+    } catch (parseError) {
+      // 如果解析失败，尝试手动修复常见问题
+      logger.warn('初次JSON解析失败，尝试修复', { error: parseError.message });
+      
+      // 移除可能的尾随逗号
+      jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+      
+      // 再次尝试解析
+      result = JSON.parse(jsonStr);
+    }
     
     // 验证必需字段
     if (!result.functionDefinition || !result.executorCode) {
       throw new Error('生成结果缺少必需字段');
     }
     
-    // 添加生成时间到 RAG 请求
-    if (result.ragRequest) {
-      result.ragRequest.generated = new Date().toISOString();
+    
+    // 确保返回的代码字符串格式正确
+    if (typeof result.functionDefinition === 'string') {
+      result.functionDefinition = result.functionDefinition.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+    }
+    if (typeof result.executorCode === 'string') {
+      result.executorCode = result.executorCode.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
     }
     
     logger.info('成功解析生成的代码', {
-      functionName: result.ragRequest?.functionName || 'unknown',
       definitionLength: result.functionDefinition.length,
       codeLength: result.executorCode.length
     });
@@ -821,7 +889,7 @@ function parseGeneratedCode(content) {
     return result;
     
   } catch (error) {
-    logger.error('解析生成代码失败', { error: error.message, content });
+    logger.error('解析生成代码失败', { error: error.message, content: content.substring(0, 500) + '...' });
     throw new Error(`解析生成结果失败: ${error.message}`);
   }
 }
@@ -880,7 +948,7 @@ app.post('/api/playwright/install', async (req, res) => {
  */
 app.post('/api/generate-function', async (req, res) => {
   try {
-    const { functionName, playwrightScript, description, outputDesc, dependencies = [] } = req.body;
+    const { functionName, functionType, playwrightScript, description, outputDesc, dependencies = [] } = req.body;
 
     // 参数验证
     if (!functionName) {
@@ -895,14 +963,16 @@ app.post('/api/generate-function', async (req, res) => {
 
     logger.info('开始生成 LLM Function', {
       functionName,
+      functionType,
       scriptLength: playwrightScript.length,
       description,
       dependencies: dependencies.length
     });
 
     // 调用 DeepSeek 生成代码
-    const { functionDefinition, executorCode, ragRequest } = await generateLLMFunction({
+    const { functionDefinition, executorCode } = await generateLLMFunction({
       functionName,
+      functionType,
       playwrightScript,
       description,
       outputDesc,
@@ -914,8 +984,7 @@ app.post('/api/generate-function', async (req, res) => {
     res.json({
       success: true,
       functionDefinition,
-      executorCode,
-      ragRequest
+      executorCode
     });
 
   } catch (error) {
@@ -932,11 +1001,63 @@ app.post('/api/generate-function', async (req, res) => {
  */
 app.post('/api/rag/store', async (req, res) => {
   try {
-    // TODO: 实现 RAG 存储逻辑
-    res.json({ success: true });
+    const ragData = req.body;
+    
+    // 参数验证
+    if (!ragData || !ragData.name) {
+      return res.status(400).json({ error: 'RAG数据不完整，缺少name字段' });
+    }
+
+    logger.info('开始存储到RAG数据库', { 
+      name: ragData.name, 
+      category: ragData.category 
+    });
+
+    // 获取RAG服务的URL
+    const RAG_BASE_URL = process.env.VITE_RAG_BASE_URL || 'http://localhost:8000';
+    
+    // 调用RAG服务的API
+    const ragResponse = await fetch(`${RAG_BASE_URL}/functions/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(ragData)
+    });
+
+    if (!ragResponse.ok) {
+      const errorText = await ragResponse.text();
+      logger.error('RAG服务响应失败', { 
+        status: ragResponse.status, 
+        statusText: ragResponse.statusText,
+        error: errorText
+      });
+      
+      return res.status(ragResponse.status).json({ 
+        error: `RAG服务存储失败: ${ragResponse.statusText}`,
+        details: errorText
+      });
+    }
+
+    const ragResult = await ragResponse.json();
+    
+    logger.info('成功存储到RAG数据库', { 
+      functionId: ragResult.function_id,
+      name: ragData.name
+    });
+
+    res.json({ 
+      success: true, 
+      function_id: ragResult.function_id,
+      message: '成功存储到RAG数据库'
+    });
+
   } catch (error) {
-    logger.error('存储到 RAG 失败', { error: error.message });
-    res.status(500).json({ error: error.message });
+    logger.error('存储到 RAG 失败', { error: error.message, stack: error.stack });
+    res.status(500).json({ 
+      error: '存储到RAG失败',
+      details: error.message
+    });
   }
 });
 

@@ -68,7 +68,7 @@ export const generateFunction = async (data: GenerateFunctionRequest): Promise<G
   }
 };
 
-export const storeToRAG = async (data: RAGStoreRequest): Promise<{ success: boolean }> => {
+export const storeToRAG = async (data: any): Promise<{ success: boolean; function_id?: string; message?: string }> => {
   try {
     const response = await api.post('/rag/store', data);
     return response.data;
