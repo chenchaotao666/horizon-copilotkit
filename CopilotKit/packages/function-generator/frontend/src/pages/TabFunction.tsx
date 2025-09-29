@@ -13,6 +13,7 @@ const TabFunction: React.FC = () => {
     functionDefinition: '',
     ragRequest: '',
     executorCode: '',
+    functionType: 'script-action',
     formData: {
       functionName: '',
       playwrightScript: '',
@@ -22,12 +23,13 @@ const TabFunction: React.FC = () => {
     },
   });
 
-  const handleGenerated = (functionDefinition: string, executorCode: string, ragRequest: string) => {
+  const handleGenerated = (functionDefinition: string, executorCode: string, ragRequest: string, functionType?: string) => {
     setState(prev => ({
       ...prev,
       functionDefinition,
       executorCode,
       ragRequest,
+      functionType: functionType || prev.functionType,
       activeTab: '2', // 自动切换到第二个tab
     }));
   };
@@ -78,6 +80,7 @@ const TabFunction: React.FC = () => {
         <Tab2FunctionDefinition
           functionDefinition={state.functionDefinition}
           ragRequest={state.ragRequest}
+          functionType={state.functionType}
           onFunctionDefinitionChange={handleFunctionDefinitionChange}
           onRagRequestChange={handleRagRequestChange}
         />

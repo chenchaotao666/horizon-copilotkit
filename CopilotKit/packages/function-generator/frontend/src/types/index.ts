@@ -3,6 +3,7 @@ export interface TabFunctionState {
   functionDefinition: string;
   ragRequest: string;
   executorCode: string;
+  functionType: string;
   formData: {
     functionName: string;
     playwrightScript: string;
@@ -14,6 +15,7 @@ export interface TabFunctionState {
 
 export interface GenerateFunctionRequest {
   functionName: string;
+  functionType: string;
   playwrightScript: string;
   description: string;
   outputDesc: string;
