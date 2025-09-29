@@ -14,6 +14,7 @@ const rateLimit = require('express-rate-limit');
 const iconv = require('iconv-lite');
 const OpenAI = require('openai');
 const { HttpsProxyAgent } = require('https-proxy-agent');
+const axios = require('axios');
 require('dotenv').config();
 
 // 配置日志
@@ -1047,29 +1048,17 @@ app.post('/api/rag/store', async (req, res) => {
     const RAG_BASE_URL = process.env.VITE_RAG_BASE_URL || 'http://localhost:8000';
     
     // 调用RAG服务的API
-    const ragResponse = await fetch(`${RAG_BASE_URL}/functions/`, {
-      method: 'POST',
+    const ragResponse = await axios.post(`${RAG_BASE_URL}/functions/`, ragData, {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(ragData)
+      timeout: 30000, // 30秒超时
+      // 使用代理配置（如果有）
+      httpAgent: proxyAgent,
+      httpsAgent: proxyAgent
     });
 
-    if (!ragResponse.ok) {
-      const errorText = await ragResponse.text();
-      logger.error('RAG服务响应失败', { 
-        status: ragResponse.status, 
-        statusText: ragResponse.statusText,
-        error: errorText
-      });
-      
-      return res.status(ragResponse.status).json({ 
-        error: `RAG服务存储失败: ${ragResponse.statusText}`,
-        details: errorText
-      });
-    }
-
-    const ragResult = await ragResponse.json();
+    const ragResult = ragResponse.data;
     
     logger.info('成功存储到RAG数据库', { 
       functionId: ragResult.function_id,
@@ -1083,11 +1072,37 @@ app.post('/api/rag/store', async (req, res) => {
     });
 
   } catch (error) {
-    logger.error('存储到 RAG 失败', { error: error.message, stack: error.stack });
-    res.status(500).json({ 
-      error: '存储到RAG失败',
-      details: error.message
-    });
+    if (error.response) {
+      // RAG服务返回了错误响应
+      logger.error('RAG服务响应失败', { 
+        status: error.response.status, 
+        statusText: error.response.statusText,
+        error: error.response.data
+      });
+      
+      return res.status(error.response.status).json({ 
+        error: `RAG服务存储失败: ${error.response.statusText}`,
+        details: error.response.data
+      });
+    } else if (error.request) {
+      // 请求发送了但没有收到响应
+      logger.error('无法连接到RAG服务', { 
+        error: error.message,
+        config: error.config
+      });
+      
+      return res.status(503).json({ 
+        error: '无法连接到RAG服务',
+        details: '请检查RAG服务是否启动并运行在正确的端口'
+      });
+    } else {
+      // 其他错误
+      logger.error('存储到 RAG 失败', { error: error.message, stack: error.stack });
+      res.status(500).json({ 
+        error: '存储到RAG失败',
+        details: error.message
+      });
+    }
   }
 });
 
