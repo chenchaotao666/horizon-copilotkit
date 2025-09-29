@@ -46,15 +46,44 @@ const app = express();
 // ============================================================================
 
 // 设置代理（如果有）
-let proxyAgent;
-try {
-  const proxy = process.env.HTTP_PROXY || process.env.HTTPS_PROXY;
-  if (proxy) {
-    proxyAgent = new HttpsProxyAgent(proxy);
-    logger.info('使用代理配置', { proxy });
+const HUAWEI_PROXY = process.env.HUAWEI_PROXY || process.env.HTTP_PROXY || process.env.HTTPS_PROXY;
+
+// 设置代理环境变量（如果尚未设置）
+if (HUAWEI_PROXY) {
+  if (!process.env.HTTP_PROXY) {
+    process.env.HTTP_PROXY = HUAWEI_PROXY;
   }
-} catch (error) {
-  logger.warn('代理配置失败', { error: error.message });
+  if (!process.env.HTTPS_PROXY) {
+    process.env.HTTPS_PROXY = HUAWEI_PROXY;
+  }
+}
+
+// 设置不使用代理的地址
+if (!process.env.NO_PROXY) {
+  process.env.NO_PROXY = 'localhost,127.0.0.1,.huawei.com';
+}
+
+// SSL 验证配置（更清晰的逻辑）
+const shouldRejectUnauthorized = process.env.DISABLE_SSL_VERIFY !== 'true' 
+  && process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0';
+
+if (process.env.DISABLE_SSL_VERIFY === 'true' && !process.env.NODE_TLS_REJECT_UNAUTHORIZED) {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
+
+let proxyAgent;
+
+// 创建代理 Agent（如果需要）
+if (HUAWEI_PROXY) {
+  const { HttpsProxyAgent } = require('https-proxy-agent');
+  
+  proxyAgent = new HttpsProxyAgent(HUAWEI_PROXY, {
+    rejectUnauthorized: shouldRejectUnauthorized,
+    timeout: parseInt(process.env.PROXY_TIMEOUT || '60000', 10),
+    keepAlive: true
+  });
+  
+  console.log(`Using proxy: ${HUAWEI_PROXY.replace(/\/\/.*:.*@/, '//***:***@')}`); // 隐藏密码
 }
 
 // 初始化 DeepSeek 客户端
@@ -64,6 +93,7 @@ const deepSeekClient = new OpenAI({
   httpAgent: proxyAgent,
   httpsAgent: proxyAgent
 });
+
 
 if (!process.env.DEEPSEEK_API_KEY) {
   logger.warn('DEEPSEEK_API_KEY 未设置，LLM Function 生成功能将不可用');
